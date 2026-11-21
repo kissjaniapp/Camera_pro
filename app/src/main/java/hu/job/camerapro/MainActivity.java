@@ -22,20 +22,56 @@ public class MainActivity extends Activity {
  private android.content.SharedPreferences prefs;
  private static final int AUTH=12, IMPORT=13;
  private static final String SCOPE="https://www.googleapis.com/auth/drive.file";
+ private LinearLayout content,nav;
+ private String page="home", apStatus="Nincs ellenőrizve";
+ private final StringBuilder diag=new StringBuilder();
+ private EditText apIp;
+ private volatile int attempt=0;
+ private static final int BG=0xff09121e, PANEL=0xff202d3b, ACCENT=0xff45c6dd;
  @Override public void onCreate(Bundle b){
- super.onCreate(b); prefs=getSharedPreferences("settings",0);
- ScrollView scroll=new ScrollView(this); LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(24,24,24,24);scroll.addView(root);setContentView(scroll);
- TextView title=new TextView(this);title.setText("Camera Pro • 0.1");title.setTextSize(26);root.addView(title);
- status=new TextView(this);status.setText("Nincs kapcsolat");root.addView(status);
- view=new PlayerView(this);root.addView(view,new LinearLayout.LayoutParams(-1, (int)(getResources().getDisplayMetrics().widthPixels*0.56)));
- url=new EditText(this);url.setSingleLine(true);url.setHint("RTSP vagy HTTP videó URL");url.setText(prefs.getString("url",""));root.addView(url);
- button(root,"Élőkép indítása (eredeti minőség)",()->play());
- button(root,"Élőkép leállítása",()->{if(player!=null)player.stop();});
- button(root,"BW4 helyi kapcsolat ellenőrzése",()->new Thread(()->{
- StringBuilder s=new StringBuilder();
- for(String ip:new String[]{"192.168.168.1","192.168.1.218"}){try(java.net.Socket socket=new java.net.Socket()){socket.connect(new java.net.InetSocketAddress(ip,81),2000);s.append(ip).append(":81 elérhető; a gyári protokoll még nincs támogatva.\n");}catch(Exception e){s.append(ip).append(":81 nem elérhető.\n");}}
- runOnUiThread(()->status.setText(s.toString()));
- }).start());
+ super.onCreate(b);prefs=getSharedPreferences("settings",0);
+ getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
+ showHome();
+ }
+ private int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
+ private android.graphics.drawable.GradientDrawable bg(int c,int radius){android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();d.setColor(c);d.setCornerRadius(dp(radius));return d;}
+ private TextView text(String t,int size,int color){TextView x=new TextView(this);x.setText(t);x.setTextSize(size);x.setTextColor(color);return x;}
+ private LinearLayout column(){LinearLayout l=new LinearLayout(this);l.setOrientation(1);return l;}
+ private void gap(LinearLayout l,int h){l.addView(new View(this),new LinearLayout.LayoutParams(1,dp(h)));}
+ private void shell(String name,String key){
+ attempt++;if(player!=null){player.release();player=null;}page=key;
+ LinearLayout root=column();root.setBackgroundColor(BG);setContentView(root);
+ TextView title=text(name,25,-1);title.setPadding(dp(18),dp(18),dp(16),dp(12));root.addView(title);
+ ScrollView sc=new ScrollView(this);content=column();content.setPadding(dp(14),dp(4),dp(14),dp(16));sc.addView(content);root.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+ nav=new LinearLayout(this);nav.setBackgroundColor(PANEL);root.addView(nav,new LinearLayout.LayoutParams(-1,dp(64)));
+ tab("Kamerák", "home",()->showHome());tab("Felvételek","files",()->showFiles());tab("Beállítások","settings",()->showSettings());
+ status=text("",14,ACCENT);
+ }
+ private void tab(String label,String key,Runnable fn){TextView t=text(label,14,page.equals(key)?ACCENT:0xffaab6c6);t.setGravity(Gravity.CENTER);nav.addView(t,new LinearLayout.LayoutParams(0,-1,1));t.setOnClickListener(v->fn.run());}
+ private void showHome(){shell("Camera Pro    +","home");
+ LinearLayout card=column();card.setBackground(bg(PANEL,16));card.setPadding(dp(16),dp(14),dp(16),dp(14));content.addView(card);
+ TextView title=text("HEIYOUCAM BW4",20,-1);card.addView(title);status.setText(apStatus);card.addView(status);gap(card,12);
+ TextView preview=text("▷\nÉlőkép megnyitása",22,0xffd0deec);preview.setGravity(Gravity.CENTER);preview.setBackground(bg(0xff050a10,10));card.addView(preview,new LinearLayout.LayoutParams(-1,dp(190)));preview.setOnClickListener(v->showLive());
+ button(card,"Kamera megnyitása",()->showLive());button(content,"+ Kamera hozzáadása / AP beállítás",()->showLive());}
+ private void showLive(){shell("‹    BW4  •  Élőkép","live");content.addView(status);status.setText(apStatus);
+ view=new PlayerView(this);view.setBackgroundColor(0xff000000);content.addView(view,new LinearLayout.LayoutParams(-1,dp(205)));
+ gap(content,8);TextView hint=text("AP mód – csatlakozz a kamera saját Wi-Fi-jéhez",15,0xffbdc9d9);content.addView(hint);
+ apIp=new EditText(this);apIp.setSingleLine(true);apIp.setInputType(android.text.InputType.TYPE_CLASS_TEXT);apIp.setText(prefs.getString("apHost","192.168.168.1"));apIp.setHint("Kamera IP-cím");content.addView(apIp);
+ button(content,"Wi-Fi hálózat kiválasztása",()->startActivity(new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)));
+ button(content,"AP csatlakozás / diagnosztika",()->probeAp());
+ button(content,"Kapcsolatnapló megnyitása",()->new AlertDialog.Builder(this).setTitle("AP kapcsolatnapló").setMessage(diag.length()==0?"Még nincs vizsgálat.":diag.toString()).setPositiveButton("Bezárás",null).show());
+ String[] names={"Mozgásérzékelés","Intercom","Sziréna","Fehér fény","Képernyőkép","Felvétel","Éjszakai látás","Érzékelési terület","Emberérzékelés"};
+ String[] icons={"◉","♩","⚠","☼","▣","●","☾","⊞","♙"};
+ for(int i=0;i<3;i++){LinearLayout row=new LinearLayout(this);content.addView(row);for(int j=0;j<3;j++){int k=i*3+j;LinearLayout tile=column();tile.setGravity(Gravity.CENTER);TextView circle=text(icons[k],28,0xff9aaabb);circle.setGravity(Gravity.CENTER);circle.setBackground(bg(PANEL,40));tile.addView(circle,new LinearLayout.LayoutParams(dp(62),dp(62)));TextView label=text(names[k],12,0xffbbcad9);label.setGravity(Gravity.CENTER);tile.addView(label);row.addView(tile,new LinearLayout.LayoutParams(0,dp(106),1));tile.setOnClickListener(v->Toast.makeText(this,"A BW4 vezérlőprotokoll még nincs igazolva.",Toast.LENGTH_SHORT).show());}}
+ gap(content,8);url=new EditText(this);url.setSingleLine(true);url.setHint("Szabványos RTSP/HTTP videó URL (opcionális)");url.setText(prefs.getString("url",""));content.addView(url);button(content,"Szabványos élőkép indítása",()->play());button(content,"Leállítás",()->{if(player!=null)player.stop();});}
+ private void probeAp(){
+ String host=apIp.getText().toString().trim();if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")){apIp.setError("IPv4 cím szükséges");return;}
+ for(String part:host.split("\\."))if(Integer.parseInt(part)>255){apIp.setError("Érvénytelen IP");return;}
+ prefs.edit().putString("apHost",host).apply();int gen=++attempt;status.setText("Kapcsolat ellenőrzése…");diag.setLength(0);
+ new Thread(()->{Bw4Client.Result result=Bw4Client.probe(this,host);runOnUiThread(()->{if(gen!=attempt||isFinishing())return;diag.append(result.log);apStatus=result.message;status.setText(apStatus);});}).start();
+ }
+ private void showFiles(){shell("Felvételek","files");File[] f=new File(getFilesDir(),"queue").listFiles((d,n)->n.endsWith(".mp4"));content.addView(text("Helyi feltöltési sor: "+(f==null?0:f.length)+" felvétel",18,-1));content.addView(status);button(content,"MP4 felvétel importálása",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("video/mp4");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,IMPORT);});button(content,"Google Drive beállítások",()->showSettings());}
+ private void showSettings(){shell("Beállítások","settings");LinearLayout root=content;root.addView(status);
  TextView label=new TextView(this);label.setText("Google Drive archiválás");label.setTextSize(20);root.addView(label);
  button(root,"Google-fiók csatlakoztatása",()->{
  GoogleSignInOptions options=new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(new Scope(SCOPE)).build();

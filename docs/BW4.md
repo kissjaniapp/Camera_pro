@@ -1,0 +1,2 @@
+# BW4 – gyári firmware
+A tesztelt helyi végpont TCP 81, de a sima HTTP-kérés megszakadt. A napló CGI videó- és vezérlési parancsokat mutat, azonban a szállítási keret és a hitelesítés nincs igazolva. Az alkalmazás nem tesz úgy, mintha a port RTSP lenne. A következő lépés saját eszközön engedélyezett AP-forgalom vizsgálata, majd a protokolladapter megvalósítása. Sem napló, sem jelszó, sem eszközazonosító nem kerül a publikus repóba.

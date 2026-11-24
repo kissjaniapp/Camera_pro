@@ -1,73 +1,95 @@
 package hu.job.camerapro;
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.SystemClock;
 import java.net.*;
-import java.io.*;
 import java.util.*;
 
-/**
- * Read-only BW4 discovery diagnostic for a user-owned device.
- * VStarcam LAN_SEARCH wire bytes from public protocol research:
- * decoded F1 E0 00 00, XOR key 15 DB 43 22, wire F5 3B 43 22.
- * Does NOT echo discovery reply or start an authenticated session.
- */
+/** Diagnostic only. No password, cloud authentication, pairing, or stream is attempted. */
 public final class Bw4Discovery {
  private static final byte[] SEARCH={(byte)0xF5,(byte)0x3B,0x43,0x22};
  private static final int PORT=32108;
  public static final class Result {
   public final String message,log;
-  Result(String message,String log){this.message=message;this.log=log;}
+  Result(String m,String l){message=m;log=l;}
  }
  private Bw4Discovery(){}
- public static Result probe(Context context,String target){
+ private static String broadcastFor(LinkAddress link){
+  InetAddress addr=link.getAddress();
+  if(!(addr instanceof Inet4Address))return null;
+  byte[] octets=addr.getAddress();
+  int bits=link.getPrefixLength();
+  if(bits<1||bits>30)return null;
+  int host=32-bits;int ip=((octets[0]&255)<<24)|((octets[1]&255)<<16)|((octets[2]&255)<<8)|(octets[3]&255);
+  int mask=(int)(0xffffffffL << host);
+  int bcast=(ip&mask)|~mask;
+  return ((bcast>>>24)&255)+"."+((bcast>>>16)&255)+"."+((bcast>>>8)&255)+"."+(bcast&255);
+ }
+ public static Result probe(Context context,String host){
   ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
-  if(cm==null)return new Result("Nincs hálózatkezelő","A hálózati szolgáltatás nem elérhető.");
+  if(cm==null)return new Result("Hálózati szolgáltatás nem elérhető","Nincs ConnectivityManager.");
   Network wifi=null;
-  for(Network n:cm.getAllNetworks()){
-   NetworkCapabilities c=cm.getNetworkCapabilities(n);
-   if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){wifi=n;break;}
+  for(Network network:cm.getAllNetworks()){
+   NetworkCapabilities caps=cm.getNetworkCapabilities(network);
+   if(caps!=null&&caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){wifi=network;break;}
   }
-  if(wifi==null)return new Result("Nincs Wi-Fi","Csatlakozz a BW4 saját Wi-Fi-jéhez vagy az otthoni hálózathoz.");
-  StringBuilder log=new StringBuilder("VStarcam LAN_SEARCH – kizárólag helyi teszt\n");
-  log.append("Cél: ").append(target).append(":").append(PORT).append("\n");
-  int found=0, unknown=0;
-  try(DatagramSocket sock=new DatagramSocket(null)){
-   sock.setReuseAddress(true);
-   sock.bind(new InetSocketAddress(0));
-   wifi.bindSocket(sock);
-   sock.setSoTimeout(850);
-   InetAddress ip=InetAddress.getByName(target);
-   DatagramPacket ask=new DatagramPacket(SEARCH,SEARCH.length,ip,PORT);
-   byte[] buffer=new byte[1400];
-   for(int attempt=0;attempt<3;attempt++){
-    sock.send(ask);
-    long stop=android.os.SystemClock.elapsedRealtime()+900;
-    while(android.os.SystemClock.elapsedRealtime()<stop){
+  if(wifi==null)return new Result("Nem található Wi-Fi hálózat","Csatlakozz a kamera AP-hálózatához.");
+  StringBuilder log=new StringBuilder("BW4 keresési teszt (LAN_SEARCH)\n");
+  log.append("Kamera IP: ").append(host).append("\n");
+  LinkedHashSet<String> destinations=new LinkedHashSet<>();
+  destinations.add(host);
+  destinations.add("255.255.255.255");
+  LinkProperties props=cm.getLinkProperties(wifi);
+  if(props!=null)for(LinkAddress link:props.getLinkAddresses()){
+   String broadcast=broadcastFor(link);if(broadcast!=null)destinations.add(broadcast);
+  }
+  log.append("Keresési célok: ").append(String.join(", ",destinations)).append("\n");
+  int recognized=0,unknown=0,packets=0;
+  LinkedHashSet<String> responders=new LinkedHashSet<>();
+  try(DatagramSocket socket=new DatagramSocket(null)){
+   socket.setReuseAddress(true);
+   socket.bind(new InetSocketAddress(0));
+   wifi.bindSocket(socket); // Prevent a mobile data/VPN route taking the packets.
+   socket.setBroadcast(true);
+   socket.setSoTimeout(250);
+   byte[] buf=new byte[1500];
+   for(int round=0;round<5;round++){
+    for(String dest:destinations){
      try{
-      DatagramPacket answer=new DatagramPacket(buffer,buffer.length);
-      sock.receive(answer);
-      if(answer.getLength()<4){unknown++;continue;}
-      int magic=(buffer[0]&255)^0x15;
-      int type=(buffer[1]&255)^0xdb;
+      InetAddress addr=InetAddress.getByName(dest);
+      DatagramPacket request=new DatagramPacket(SEARCH,SEARCH.length,addr,PORT);
+      socket.send(request);packets++;
+     }catch(IOException e){log.append("Küldés sikertelen: ").append(dest).append(" (").append(e.getClass().getSimpleName()).append(")\n");}
+    }
+    long until=SystemClock.elapsedRealtime()+1000;
+    while(SystemClock.elapsedRealtime()<until){
+     try{
+      DatagramPacket packet=new DatagramPacket(buf,buf.length);
+      socket.receive(packet);
+      if(packet.getLength()<4){unknown++;continue;}
+      int magic=(packet.getData()[packet.getOffset()]&255)^0x15;
+      int type=(packet.getData()[packet.getOffset()+1]&255)^0xdb;
       if(magic==0xf1&&type==0x91){
-       found++;
-       log.append("LAN_NOTIFY válasz érkezett: ").append(answer.getAddress().getHostAddress()).append(":").append(answer.getPort()).append("\n");
-      }else{
-       unknown++;
-       log.append("Más UDP-válasz, ").append(answer.getLength()).append(" bájt; típusa nem azonosított.\n");
-      }
-     }catch(SocketTimeoutException e){break;}
+       recognized++;
+       responders.add(packet.getAddress().getHostAddress()+":"+packet.getPort());
+      }else{unknown++;}
+     }catch(SocketTimeoutException ignored){} // Continue until round deadline.
     }
    }
-   log.append("Felismert LAN_NOTIFY: ").append(found).append("; más válasz: ").append(unknown).append("\n");
-   log.append("A videó és a munkamenet még nincs megvalósítva. A kamera UID-jét/jelszavát nem gyűjtjük.\n");
-   if(found>0)return new Result("BW4 helyi felderítés működik ("+found+" válasz)",log.toString());
-   return new Result("Nincs UDP-felderítési válasz – TCP 81 még külön tesztelhető",log.toString());
+   log.append("Elküldött UDP keresések: ").append(packets).append("\n");
+   log.append("LAN_NOTIFY válaszok: ").append(recognized).append("\n");
+   log.append("Más válaszok: ").append(unknown).append("\n");
+   for(String responder:responders)log.append("Válaszadó: ").append(responder).append("\n");
+   log.append("A BW4 gyári firmware ezt a felderítési módot nem feltétlenül támogatja.\n");
+   log.append("A 81-es TCP-protokoll és a videófolyam nincs implementálva.\n");
+   return new Result(recognized>0?"Helyi felderítés sikeres ("+recognized+" válasz)":"Nincs UDP-válasz broadcasttal sem",log.toString());
   }catch(Exception e){
-   log.append("Hálózati hiba: ").append(e.getClass().getSimpleName());
-   return new Result("UDP-kamerakeresés sikertelen",log.toString());
+   log.append("Keresés közbeni hiba: ").append(e.getClass().getSimpleName()).append("\n");
+   return new Result("A BW4 keresése sikertelen",log.toString());
   }
  }
 }

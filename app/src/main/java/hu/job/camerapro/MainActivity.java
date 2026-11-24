@@ -59,6 +59,7 @@ public class MainActivity extends Activity {
  apIp=new EditText(this);apIp.setSingleLine(true);apIp.setInputType(android.text.InputType.TYPE_CLASS_TEXT);apIp.setText(prefs.getString("apHost","192.168.168.1"));apIp.setHint("Kamera IP-cím");content.addView(apIp);
  button(content,"Wi-Fi hálózat kiválasztása",()->startActivity(new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)));
  button(content,"AP csatlakozás / diagnosztika",()->probeAp());
+ button(content,"BW4 helyi protokoll keresése (UDP)",()->probeLan());
  button(content,"Kapcsolatnapló megnyitása",()->new AlertDialog.Builder(this).setTitle("AP kapcsolatnapló").setMessage(diag.length()==0?"Még nincs vizsgálat.":diag.toString()).setPositiveButton("Bezárás",null).show());
  String[] names={"Mozgásérzékelés","Intercom","Sziréna","Fehér fény","Képernyőkép","Felvétel","Éjszakai látás","Érzékelési terület","Emberérzékelés"};
  String[] icons={"◉","♩","⚠","☼","▣","●","☾","⊞","♙"};
@@ -69,6 +70,13 @@ public class MainActivity extends Activity {
  for(String part:host.split("\\."))if(Integer.parseInt(part)>255){apIp.setError("Érvénytelen IP");return;}
  prefs.edit().putString("apHost",host).apply();int gen=++attempt;status.setText("Kapcsolat ellenőrzése…");diag.setLength(0);
  new Thread(()->{Bw4Client.Result result=Bw4Client.probe(this,host);runOnUiThread(()->{if(gen!=attempt||isFinishing())return;diag.append(result.log);apStatus=result.message;status.setText(apStatus);});}).start();
+ }
+ private void probeLan(){
+ String host=apIp.getText().toString().trim();
+ if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")){apIp.setError("Érvényes IP-cím szükséges");return;}
+ for(String part:host.split("\\."))if(Integer.parseInt(part)>255){apIp.setError("Érvénytelen IP-cím");return;}
+ prefs.edit().putString("apHost",host).apply();int gen=++attempt;status.setText("BW4 UDP-kamerakeresés folyamatban…");diag.setLength(0);
+ new Thread(()->{Bw4Discovery.Result result=Bw4Discovery.probe(this,host);runOnUiThread(()->{if(gen!=attempt||isFinishing())return;diag.append(result.log);apStatus=result.message;status.setText(apStatus);});}).start();
  }
  private void showFiles(){shell("Felvételek","files");File[] f=new File(getFilesDir(),"queue").listFiles((d,n)->n.endsWith(".mp4"));content.addView(text("Helyi feltöltési sor: "+(f==null?0:f.length)+" felvétel",18,-1));content.addView(status);button(content,"MP4 felvétel importálása",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("video/mp4");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,IMPORT);});button(content,"Google Drive beállítások",()->showSettings());}
  private void showSettings(){shell("Beállítások","settings");LinearLayout root=content;root.addView(status);

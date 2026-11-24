@@ -7,6 +7,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.os.SystemClock;
 import java.net.*;
+import java.io.IOException;
 import java.util.*;
 
 /** Diagnostic only. No password, cloud authentication, pairing, or stream is attempted. */

@@ -65,7 +65,21 @@ public class MainActivity extends Activity {
  String[] names={"Mozgásérzékelés","Intercom","Sziréna","Fehér fény","Képernyőkép","Felvétel","Éjszakai látás","Érzékelési terület","Emberérzékelés"};
  String[] icons={"◉","♩","⚠","☼","▣","●","☾","⊞","♙"};
  for(int i=0;i<3;i++){LinearLayout row=new LinearLayout(this);content.addView(row);for(int j=0;j<3;j++){int k=i*3+j;LinearLayout tile=column();tile.setGravity(Gravity.CENTER);TextView circle=text(icons[k],28,0xff9aaabb);circle.setGravity(Gravity.CENTER);circle.setBackground(bg(PANEL,40));tile.addView(circle,new LinearLayout.LayoutParams(dp(62),dp(62)));TextView label=text(names[k],12,0xffbbcad9);label.setGravity(Gravity.CENTER);tile.addView(label);row.addView(tile,new LinearLayout.LayoutParams(0,dp(106),1));tile.setOnClickListener(v->Toast.makeText(this,"A BW4 vezérlőprotokoll még nincs igazolva.",Toast.LENGTH_SHORT).show());}}
- gap(content,8);url=new EditText(this);url.setSingleLine(true);url.setHint("Szabványos RTSP/HTTP videó URL (opcionális)");url.setText(prefs.getString("url",""));content.addView(url);button(content,"Szabványos élőkép indítása",()->play());button(content,"Leállítás",()->{if(player!=null)player.stop();});}
+ gap(content,8);
+ content.addView(text("Szabványos videókapcsolat (RTSP)",18,-1));
+ content.addView(text("A gyári BW4 firmware-nél nem igazolt az RTSP-kiszolgáló. A :554/live cím a módosított firmware egyik ismert címe; önmagában nem hoz létre élőképet a gyári kamerán.",13,0xffc6ad77));
+ url=new EditText(this);url.setSingleLine(true);url.setHint("rtsp://kamera-ip:554/live");
+ String savedUrl=prefs.getString("url","");
+ url.setText(savedUrl.isEmpty()?rtspUrlForHost():savedUrl);content.addView(url);
+ button(content,"BW4 RTSP-cím beállítása (:554/live)",()->{url.setText(rtspUrlForHost());status.setText("RTSP-cím kitöltve – indításhoz nyomd meg az Élőkép próba gombot.");});
+ button(content,"Élőkép próba a megadott URL-lel",()->play());
+ button(content,"Leállítás",()->{if(player!=null){player.stop();status.setText("Lejátszás leállítva");}});
+ }
+ private String rtspUrlForHost(){
+  String host=apIp==null?prefs.getString("apHost","192.168.168.1"):apIp.getText().toString().trim();
+  if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}"))host="192.168.168.1";
+  return "rtsp://"+host+":554/live";
+ }
  private void probeAp(){
  String host=apIp.getText().toString().trim();if(!host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")){apIp.setError("IPv4 cím szükséges");return;}
  for(String part:host.split("\\."))if(Integer.parseInt(part)>255){apIp.setError("Érvénytelen IP");return;}
@@ -112,7 +126,7 @@ public class MainActivity extends Activity {
  }
  private void button(LinearLayout l,String t,Runnable r){Button b=new Button(this);b.setText(t);b.setOnClickListener(v->r.run());l.addView(b);}
  private boolean save(){try{int n=Integer.parseInt(days.getText().toString());if(n<1||n>3650)throw new Exception();prefs.edit().putInt("retention",n).putInt("unit",units.getSelectedItemPosition()).putInt("quality",quality.getSelectedItemPosition()).apply();enqueue();return true;}catch(Exception e){days.setError("Adj meg 1–3650 közötti értéket");return false;}}
- private void play(){String u=url.getText().toString().trim();if(!(u.startsWith("rtsp://")||u.startsWith("http://")||u.startsWith("https://"))){status.setText("Érvényes videó URL szükséges");return;}prefs.edit().putString("url",u).apply();if(player!=null)player.release();player=new ExoPlayer.Builder(this).build();view.setPlayer(player);player.addListener(new Player.Listener(){public void onPlayerError(PlaybackException e){status.setText("Videókapcsolat sikertelen: "+e.getErrorCodeName());} public void onPlaybackStateChanged(int s){if(s==Player.STATE_READY)status.setText("Videóforrás elérhető");}});player.setMediaItem(MediaItem.fromUri(u));player.prepare();player.play();}
+ private void play(){String u=url.getText().toString().trim();if(!(u.startsWith("rtsp://")||u.startsWith("http://")||u.startsWith("https://"))){status.setText("Érvényes videó URL szükséges");return;}prefs.edit().putString("url",u).apply();if(player!=null)player.release();player=new ExoPlayer.Builder(this).build();view.setPlayer(player);player.addListener(new Player.Listener(){public void onPlayerError(PlaybackException e){status.setText("Nem érhető el a megadott videófolyam: "+e.getErrorCodeName()+". A gyári BW4 nem biztos, hogy támogatja az RTSP-t.");} public void onPlaybackStateChanged(int s){if(s==Player.STATE_READY)status.setText("Videóforrás elérhető");}});status.setText("Videókapcsolat indítása…");player.setMediaItem(MediaItem.fromUri(u));player.prepare();player.play();}
  private void enqueue(){Constraints c=new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();WorkManager w=WorkManager.getInstance(this);w.enqueueUniqueWork("drive-now",ExistingWorkPolicy.APPEND_OR_REPLACE,new OneTimeWorkRequest.Builder(DriveWorker.class).setConstraints(c).build());w.enqueueUniquePeriodicWork("drive-retention",ExistingPeriodicWorkPolicy.KEEP,new PeriodicWorkRequest.Builder(DriveWorker.class,1,TimeUnit.DAYS).setConstraints(c).build());}
  @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==AUTH){try{GoogleSignInAccount a=GoogleSignIn.getSignedInAccountFromIntent(data).getResult();status.setText("Google-fiók csatlakoztatva");enqueue();}catch(Exception e){status.setText("Google engedélyezés sikertelen. OAuth konfiguráció szükséges lehet.");}}
  if(req==IMPORT&&result==RESULT_OK&&data!=null){Uri u=data.getData();new Thread(()->{File dir=new File(getFilesDir(),"queue");dir.mkdirs();File f=new File(dir,java.util.UUID.randomUUID()+".mp4");File tmp=new File(dir,f.getName()+".part");try(InputStream in=getContentResolver().openInputStream(u);OutputStream out=new FileOutputStream(tmp)){byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);if(!tmp.renameTo(f))throw new IOException();enqueue();runOnUiThread(()->status.setText("Felvétel a feltöltési sorban"));}catch(Exception e){tmp.delete();runOnUiThread(()->status.setText("Importálási hiba"));}}).start();}}

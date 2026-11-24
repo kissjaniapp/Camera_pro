@@ -30,8 +30,8 @@ public final class Bw4Discovery {
    if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){wifi=n;break;}
   }
   if(wifi==null)return new Result("Nincs Wi-Fi","Csatlakozz a BW4 saját Wi-Fi-jéhez vagy az otthoni hálózathoz.");
-  StringBuilder log=new StringBuilder("VStarcam LAN_SEARCH – kizárólag helyi teszt\\n");
-  log.append("Cél: ").append(target).append(":").append(PORT).append("\\n");
+  StringBuilder log=new StringBuilder("VStarcam LAN_SEARCH – kizárólag helyi teszt\n");
+  log.append("Cél: ").append(target).append(":").append(PORT).append("\n");
   int found=0, unknown=0;
   try(DatagramSocket sock=new DatagramSocket(null)){
    sock.setReuseAddress(true);
@@ -53,16 +53,16 @@ public final class Bw4Discovery {
       int type=(buffer[1]&255)^0xdb;
       if(magic==0xf1&&type==0x91){
        found++;
-       log.append("LAN_NOTIFY válasz érkezett: ").append(answer.getAddress().getHostAddress()).append(":").append(answer.getPort()).append("\\n");
+       log.append("LAN_NOTIFY válasz érkezett: ").append(answer.getAddress().getHostAddress()).append(":").append(answer.getPort()).append("\n");
       }else{
        unknown++;
-       log.append("Más UDP-válasz, ").append(answer.getLength()).append(" bájt; típusa nem azonosított.\\n");
+       log.append("Más UDP-válasz, ").append(answer.getLength()).append(" bájt; típusa nem azonosított.\n");
       }
      }catch(SocketTimeoutException e){break;}
     }
    }
-   log.append("Felismert LAN_NOTIFY: ").append(found).append("; más válasz: ").append(unknown).append("\\n");
-   log.append("A videó és a munkamenet még nincs megvalósítva. A kamera UID-jét/jelszavát nem gyűjtjük.\\n");
+   log.append("Felismert LAN_NOTIFY: ").append(found).append("; más válasz: ").append(unknown).append("\n");
+   log.append("A videó és a munkamenet még nincs megvalósítva. A kamera UID-jét/jelszavát nem gyűjtjük.\n");
    if(found>0)return new Result("BW4 helyi felderítés működik ("+found+" válasz)",log.toString());
    return new Result("Nincs UDP-felderítési válasz – TCP 81 még külön tesztelhető",log.toString());
   }catch(Exception e){
